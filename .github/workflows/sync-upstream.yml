@@ -1,0 +1,146 @@
+name: Sync Upstream
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      OPENCODE_APP_ID: ${{ vars.OPENCODE_APP_ID }}
+      OPENCODE_APP_SECRET: ${{ secrets.OPENCODE_APP_SECRET }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - src: dev
+            dst: upstream-dev
+          - src: beta
+            dst: upstream-beta
+          - src: production
+            dst: upstream-production
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup git committer
+        id: committer
+        if: env.OPENCODE_APP_ID != '' && env.OPENCODE_APP_SECRET != ''
+        continue-on-error: true
+        uses: ./.github/actions/setup-git-committer
+        with:
+          opencode-app-id: ${{ env.OPENCODE_APP_ID }}
+          opencode-app-secret: ${{ env.OPENCODE_APP_SECRET }}
+
+      - name: Setup git fallback
+        if: env.OPENCODE_APP_ID == '' || env.OPENCODE_APP_SECRET == '' || steps.committer.outcome != 'success'
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}
+
+      - name: Fetch branches
+        run: |
+          git remote add upstream https://github.com/anomalyco/opencode.git
+          git fetch upstream ${{ matrix.src }}
+
+      - name: Sync branch
+        run: |
+          git checkout -B ${{ matrix.dst }} upstream/${{ matrix.src }}
+          git push origin ${{ matrix.dst }} --force
+
+  rebase-dev:
+    needs: sync
+    runs-on: ubuntu-latest
+    env:
+      OPENCODE_APP_ID: ${{ vars.OPENCODE_APP_ID }}
+      OPENCODE_APP_SECRET: ${{ secrets.OPENCODE_APP_SECRET }}
+    steps:
+      - name: Checkout dev
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: dev
+
+      - name: Setup git committer
+        id: committer
+        if: env.OPENCODE_APP_ID != '' && env.OPENCODE_APP_SECRET != ''
+        continue-on-error: true
+        uses: ./.github/actions/setup-git-committer
+        with:
+          opencode-app-id: ${{ env.OPENCODE_APP_ID }}
+          opencode-app-secret: ${{ env.OPENCODE_APP_SECRET }}
+
+      - name: Setup git fallback
+        if: env.OPENCODE_APP_ID == '' || env.OPENCODE_APP_SECRET == '' || steps.committer.outcome != 'success'
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}
+
+      - name: Fetch branches
+        run: |
+          git fetch origin upstream-dev
+          git fetch origin dev
+
+      - name: Rebase dev onto upstream-dev
+        id: rebase
+        continue-on-error: true
+        run: |
+          git checkout -B dev origin/dev
+          if git rebase origin/upstream-dev; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git diff --name-only --diff-filter=U > conflict.txt || true
+          git rebase --abort || true
+          echo "ok=false" >> "$GITHUB_OUTPUT"
+
+      - name: Push dev
+        if: steps.rebase.outputs.ok == 'true'
+        run: git push origin dev --force-with-lease
+
+      - name: Create issue for manual rebase
+        if: steps.rebase.outputs.ok == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs")
+            const title = "Dev branch rebase failed"
+            const files = fs.existsSync("conflict.txt")
+              ? fs.readFileSync("conflict.txt", "utf8").split("\n").filter(Boolean)
+              : []
+            const run = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`
+            const body = [
+              "The nightly rebase of fork `dev` onto `upstream-dev` failed.",
+              "",
+              "**Conflicted files**",
+              files.length ? files.map((file) => `- \`${file}\``).join("\n") : "- Unknown",
+              "",
+              `Workflow run: ${run}`,
+            ].join("\n")
+
+            const issues = await github.rest.search.issuesAndPullRequests({
+              q: `repo:${context.repo.owner}/${context.repo.repo} is:issue is:open in:title "${title}"`,
+            })
+
+            const existing = issues.data.items.find((issue) => issue.title === title)
+            if (existing) return
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+            })
