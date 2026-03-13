@@ -139,6 +139,14 @@ This keeps the fork aligned with upstream direction instead of accumulating stal
 7. Run tests, type checks, and architecture checks on the integrated result.
 8. Produce fork releases on our own cadence while preserving a clean path back upstream when possible.
 
+## Evaluation Pipeline
+
+Detailed planning for Codex-led PR intake, judge passes, agent-user testing, and fork-native implementation lives in [`pr-evaluation-pipeline.md`](./pr-evaluation-pipeline.md).
+
+## Task Tracking
+
+Cross-session planning for this fork lives in the repo-local `.dots/` directory. See [`task-tracking.md`](./task-tracking.md) for the project conventions and starter backlog.
+
 ## Sources
 
 - GitHub pull requests for `anomalyco/opencode`: https://github.com/anomalyco/opencode/pulls
