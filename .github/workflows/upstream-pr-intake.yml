@@ -1,0 +1,54 @@
+name: upstream-pr-intake
+
+on:
+  schedule:
+    - cron: "15 4 * * *"
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Max PRs to ingest. Leave blank to ingest all open PRs."
+        required: false
+        type: string
+
+concurrency:
+  group: upstream-pr-intake
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  ingest:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Ingest upstream PR metadata
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          LIMIT: ${{ github.event.inputs.limit }}
+        run: |
+          args=()
+          if [ -n "$LIMIT" ]; then
+            args+=(--limit "$LIMIT")
+          fi
+
+          bun script/ingest-upstream-prs.ts --dir tmp/upstream-prs "${args[@]}"
+
+      - name: Upload intake artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: upstream-pr-metadata-${{ github.run_id }}
+          path: tmp/upstream-prs
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish job summary
+        run: cat tmp/upstream-prs/summary.md >> "$GITHUB_STEP_SUMMARY"
