@@ -6,11 +6,4 @@ issue-type: task
 created-at: "2026-03-13T17:02:38.512954-05:00"
 ---
 
-Curate historical anomalyco/opencode PRs into a labeled dataset with known integrate, rework, reject, and defer outcomes.
-
-Each benchmark case should include:
-- upstream PR metadata and diff
-- the upstream and fork snapshot used for replay
-- expected verdict
-- expected keep, change, and drop notes when the answer is `rework`
-- later regression or release outcome when known
+Curate upstream anomalyco/opencode PRs as a proxy gold set for initial pipeline benchmarking. Each case includes: upstream PR metadata and diff, snapshot context, expected verdict, expected keep/change/drop notes for rework cases, and regression/release outcomes when known. This is a stopgap until the fork generates enough real PR history.
