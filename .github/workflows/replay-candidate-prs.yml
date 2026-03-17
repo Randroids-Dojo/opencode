@@ -1,0 +1,53 @@
+name: replay-candidate-prs
+
+on:
+  workflow_dispatch:
+    inputs:
+      prs:
+        description: "Comma or space separated upstream PR numbers to replay on fork dev."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Refresh upstream PR metadata
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bun script/ingest-upstream-prs.ts --dir tmp/upstream-prs
+
+      - name: Replay selected PRs on dev
+        run: bun script/replay-candidate-prs.ts --prs "${{ github.event.inputs.prs }}" --dir tmp/replay
+
+      - name: Upload replay artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: replay-candidate-prs-${{ github.run_id }}
+          path: |
+            tmp/replay
+            tmp/upstream-prs
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish job summary
+        if: always()
+        run: |
+          if [ -f tmp/replay/summary.md ]; then
+            cat tmp/replay/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Replay summary was not generated." >> "$GITHUB_STEP_SUMMARY"
+          fi
